@@ -53,8 +53,9 @@ echo "[*] using cargo $ver ($CARGO)"
 
 case "$ROLE" in
 ion)
-    echo "[*] bp-socket build deps (kernel headers + toolchain)"
-    apt-get install -y "linux-headers-$(uname -r)" automake libtool
+    echo "[*] bp-socket build deps (kernel headers + module/daemon toolchain)"
+    apt-get install -y "linux-headers-$(uname -r)" automake libtool \
+        libevent-dev libnl-3-dev libnl-genl-3-dev
     echo "[i] assuming ION-DTN is already installed (ionstart on PATH, libs in /usr/local/lib)."
     if ! command -v ionstart >/dev/null 2>&1; then
         echo "[warn] ionstart not found on PATH; make sure ION is installed before start_ion.sh"
