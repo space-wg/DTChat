@@ -1,193 +1,110 @@
-# DTChat - Delay Tolerant Network Chat Application
+# DTChat — 3-Node DTN Interop Demo
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+DTChat is a GUI chat app for Delay Tolerant Networks (Bundle Protocol). This
+repo is set up for a 3-node full-mesh demo: **Earth** and **Mars** run ION-DTN
+(reached via bp-socket / `AF_BP`), **Moon** runs µD3TN (reached via a local AAP2
+bridge). Each node runs the same DTChat binary with a different config and talks
+only to its local DTN stack; the stacks route between planets over the network.
 
-DTChat is a modern, GUI-based chat application designed for Delay Tolerant Networks (DTN) using Bundle Protocol communication. Built with Rust and egui, it provides real-time messaging with predictive delivery times through advanced routing algorithms.
+![DTChat](image.png)
 
-## Features
+## Topology
 
-- **Bundle Protocol Integration**: Native support for ION-DTN and bp-socket
-- **PBAT (Predicted Bundle Arrival Time)**: Real-time delivery predictions using A-SABR routing algorithms
-- **Modern GUI**: Clean, responsive interface built with egui framework
-- **Multiple Views**: Message list, timeline graph, and data table visualizations
-- **Protobuf Support**: Efficient message serialization and ACK support
-- **Real-time Updates**: Live message status and delivery confirmations
-- **Contact Plan Integration**: ION contact plan parsing for optimal routing
+| Node  | Node ID | IP          | Stack   | DTChat endpoint | Transport            |
+|-------|---------|-------------|---------|-----------------|----------------------|
+| earth | ipn:10  | 192.168.1.1 | ION-DTN | ipn:10.2        | bp-socket (AF_BP)    |
+| moon  | ipn:20  | 192.168.1.2 | µD3TN   | ipn:20.2        | TCP → AAP2 bridge    |
+| mars  | ipn:30  | 192.168.2.2 | ION-DTN | ipn:30.2        | bp-socket (AF_BP)    |
 
-## Architecture
+One-way delays: earth↔moon ≈ 1 s, earth↔mars ≈ 240 s. Earth relays moon↔mars
+(mars has no direct contact with moon), so moon→mars ≈ 241 s. These values live
+in the ION `ipn.rc` (routing) and `db/contact_plan.rc` (DTChat's PBAT bars).
 
-```
-DTChat/
-├── src/
-│   ├── app.rs                      # Main application logic
-│   ├── main.rs                     # Entry point
-│   ├── layout/                     # UI components
-│   │   ├── rooms/                  # Chat interface modules
-│   │   │   ├── message_list.rs     # Message display
-│   │   │   ├── message_prompt.rs   # Input handling
-│   │   │   ├── message_forge.rs    # Peer selection
-│   │   │   └── message_graph.rs    # Timeline visualization
-│   │   └── menu_bar.rs             # Navigation menu
-│   ├── utils/                      # Core utilities
-│   │   ├── prediction_config.rs    # Prediction implementation using A-SABR routing
-│   │   ├── proto.rs                # Message serialization
-│   │   ├── socket.rs               # Network communication
-│   │   ├── message.rs              # Message data structures
-│   │   ├── config.rs               # Configuration management
-│   │   └── ack.rs                  # Acknowledgment handling
-│   └── proto/                      # Protocol buffer definitions
-│       └── message.proto           # Message format specification
-├── A-SABR/                         # Routing algorithm submodule
-├── database.yaml                   # Peer and network configuration
-└── Cargo.toml                      # Dependencies and features
-```
+## Prerequisites
 
-## Quick Start
+- **Rust** (all nodes): https://rustup.rs/ , plus `protobuf`.
+- **Earth / Mars** (ION): ION-DTN installed, plus `linux-headers-$(uname -r)` and
+  `build-essential` so the bp-socket kernel module builds.
+- **Moon** (µD3TN): a running µD3TN and `python-ud3tn-utils` on `PYTHONPATH`.
 
-### Prerequisites
-
-- **Rust 1.70+**: [Install Rust](https://rustup.rs/)
-- **ION-DTN or bp-socket**: Bundle Protocol daemon
-- **Git**: For submodule support
-- [Protobuf](https://protobuf.dev/installation/)
-
-### Installation
+On a fresh Debian/Ubuntu/Pop!_OS machine, `scripts/setup/bootstrap.sh` installs all
+of the above (build + GUI libs, Rust, kernel headers, and the role's DTN stack):
 
 ```bash
-# Clone the repository with submodules
-git clone --recursive https://github.com/DTN-MTP/DTChat.git
+sudo ROLE=ion   ./scripts/setup/bootstrap.sh   # Earth / Mars
+sudo ROLE=ud3tn ./scripts/setup/bootstrap.sh   # Moon (builds uD3TN + AAP2 utils)
+```
+
+## Clone
+
+```bash
+git clone https://github.com/space-wg/DTChat.git
 cd DTChat
-
-# in the node VM Build the project
 cargo build --release
-
-# Run DTChat with default configuration
-DTCHAT_CONFIG=./db/default.yaml  cargo run 
 ```
 
-### Configuration (DTCHAT_CONFIG)
+## Run the demo
 
-Three different configuration files are available in the `db` directory:
-- `default.yaml`: Default configuration for local testing
-- `ion.yaml`: Example configuration for ion integration (dtchat-bp-socket-testing)
-- `ud3dtn.yaml`: Example configuration for ud3dtn integration(dtchat-bp-socket-testing)
+### Earth / Mars (ION)
 
-
-**Configure contact plan (example)**:
-
-```
-# ION Administration
-a contact +0 +86400 30 30 100000
-a range +0 +86400 30 30 1
-
-# Bundle Protocol 
-a protocol tcp 1400 100
-a induct tcp 192.168.50.10:4556 tcpcli
-a outduct tcp 192.168.50.30:4556 tcpclo
-```
-
-## Usage
-
-### Basic Chat
-
-1. **Start DTChat**: `DTCHAT_CONFIG=./db/default.yaml cargo run`
-2. **Select a peer** from the dropdown menu
-3. **Click on the PBAT checkbox (optional)** to view delivery time prediction
-4. **Type your message** in the input field
-5. **Press Enter or click Send**
-6. **View delivery predictions** in real-time (if PBAT enabled)
-
-![DTChat Main Interface ](docs/img/DTChat%20Graph%20view%20with%20pbat.png)
-*DTChat Main Interface Showing Type Of Messages (Sent, Sent with PBAT enabled and Received Messages)*
-
-### Message Status Indicators
-
-- **Sent Messages**: `[sent_time->predicted_time][sender]`
-- **Received Messages**: `[sent_time->received_time✓][sender]`
-- **Failed Delivery**: Error indicators and retry options
-
-
-### Views
-
-- **List View**: Chronological message display
-- **Graph View**: Timeline with delivery predictions
-- **Table View**: Structured data with timestamps
-
-## Development
-
-### Building Features
+`start_ion.sh` starts ION, builds + inserts `bp.ko` (idempotent), and runs the
+bp-socket daemon. `bp-socket` is vendored in this repo, so the default path works.
 
 ```bash
-# Development build with debug features
-cargo run --features dev
-
-
-### Project Structure
-
-- **UI Components**: `src/layout/` - egui-based interface modules
-- **Network Layer**: `src/utils/socket.rs` - Bundle Protocol communication
-- **PBAT Using Routing Algorithms**: `src/utils/prediction_config.rs` - A-SABR integration
-- **Message Handling**: `src/utils/message.rs` - Data structures and serialization
-- **Configuration**: `src/utils/config.rs` - YAML-based configuration
-
-
-## Advanced Features
-
-### A-SABR Routing Integration
-
-DTChat integrates with the A-SABR (Adaptive Schedule-Aware Bundle Routing) framework for:
-- **Contact Plan Analysis**: Parses ION contact plans for network topology
-- **Route Optimization**: Calculates optimal paths based on contact schedules
-- **Delivery Prediction**: Estimates message arrival times with high accuracy
-- **Dynamic Adaptation**: Adjusts routes based on network conditions
-
-### Protocol Buffer Support
-
-Efficient message serialization with:
-- **Message Types**: Text, ACK, status updates
-- **Delivery Tracking**: Message UUIDs and delivery confirmations
-- **Compression**: Optimized for bandwidth-constrained networks
-- **Compatibility**: Backward compatibility with text-mode debugging
-
-### Network Protocols
-
-Supports multiple transport mechanisms:
-- **Bundle Protocol**: Native DTN communication
-- **TCP/UDP**: Traditional networking for testing
-- **ION Integration**: Direct integration with NASA's ION-DTN
-- **bp-socket**: Kernel-level Bundle Protocol support
-
-## Troubleshooting
-
-### Common Issues
-
-**"No route found"**
-```bash
-# Check contact plan configuration
-cat <contact_plan file>
-
-# Verify ION daemon status  
-ionadmin
-
-# Check database.yaml configuration
-cat database.yaml
+sudo NODE=earth ./scripts/ion/start_ion.sh        # use NODE=mars on Mars
+# in a second terminal on the same node:
+DTCHAT_CONFIG=db/earth.yaml cargo run --release    # db/mars.yaml on Mars
 ```
 
-## License
+Override the bp-socket location with `BP_SOCKET_DIR=/path/to/bp-socket` and ION's
+lib dir with `ION_LIB=/usr/local/lib` if needed.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### Moon (µD3TN)
 
-## Acknowledgments
+Start µD3TN (see `db/moon.yaml` header for the exact `ud3tn` line), then the
+bridge and DTChat:
 
-- **A-SABR Framework**: Advanced routing algorithms for DTN networks
-- **ION-DTN**: NASA's Interplanetary Overlay Network
-- **egui**: Immediate mode GUI framework for Rust
-- **DTN Research Community**: For delay-tolerant networking innovations
+```bash
+export UD3TN_BDM_SECRET=<your 16+ char secret>
+python3 scripts/aap2_bridge/aap2_bridge.py \
+    --aap2-socket ud3tn.aap2.socket --agentid 2 \
+    --recv-forward 127.0.0.1:7720 \
+    --route 7710=ipn:10.2 --route 7730=ipn:30.2 &
+DTCHAT_CONFIG=db/moon.yaml cargo run --release
+```
 
-## Related Projects
+## Local testing (no DTN stack)
 
-- **[A-SABR](https://github.com/DTN-MTP/A-SABR)**: Adaptive Schedule-Aware Bundle Routing
-- **[bp-socket](https://github.com/DTN-MTP/bp-socket)**: Kernel-level Bundle Protocol support
-- **[ION-DTN](https://sourceforge.net/projects/ion-dtn/)**: NASA's DTN implementation
+Three loopback configs simulate the mesh over UDP on one machine:
 
----
+```bash
+DTCHAT_CONFIG=db/default.yaml cargo run   # earth (10)
+DTCHAT_CONFIG=db/local2.yaml  cargo run   # moon  (20)
+DTCHAT_CONFIG=db/local3.yaml  cargo run   # mars  (30)
+```
+
+This exercises fan-out, PBAT bars, and ACKs. Real per-hop delays only appear once
+connected to the actual DTN stacks.
+
+```bash
+cargo test                                   # app + mesh integration tests
+python3 scripts/aap2_bridge/test_aap2_bridge.py   # bridge relay tests
+```
+
+## What to edit for a different network
+
+| Change            | Edit                                                        |
+|-------------------|-------------------------------------------------------------|
+| Ethernet IPs      | `scripts/ion/*.ipn.rc` (induct/outduct/plan), µD3TN contacts |
+| EIDs              | `scripts/ion/*.ipn.rc` **and** `db/*.yaml`                  |
+| Delays / topology | `scripts/ion/*.ipn.rc` (range) **and** `db/contact_plan.rc` |
+
+## Layout
+
+```
+db/                 per-node configs + contact plan
+scripts/ion/        ION ipn.rc files + start_ion.sh
+scripts/aap2_bridge/ µD3TN AAP2 bridge + tests
+bp-socket/          vendored AF_BP kernel module + daemon (ION nodes)
+src/                DTChat application
+```
