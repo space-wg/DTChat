@@ -1,0 +1,36 @@
+# Earth node: ipn:10, 192.168.1.1, ION-DTN. DTChat is co-located with ION and
+# sends/receives over bp-socket (AF_BP) on EID ipn:10.2.
+# ION must register the DTChat endpoint: `a endpoint ipn:10.2 q` in ipn.rc.
+# Earth relays moon<->mars (it is the only neighbor of both).
+a_sabr: "db/contact_plan.rc"
+
+local_peer:
+  uuid: "10"
+  name: earth
+  endpoints:
+    - type: Bp
+      address: "ipn:10.2"
+  color: 2
+
+# Full mesh: every peer here receives a copy of each message sent.
+peer_list:
+  - uuid: "20"
+    name: moon
+    endpoints:
+      - type: Bp
+        address: "ipn:20.2"
+    color: 1
+  - uuid: "30"
+    name: mars
+    endpoints:
+      - type: Bp
+        address: "ipn:30.2"
+    color: 0
+
+room_list:
+  - uuid: "0"
+    name: room 1
+    participants:
+      - 10
+      - 20
+      - 30

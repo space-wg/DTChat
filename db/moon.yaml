@@ -1,0 +1,53 @@
+# Moon node: ipn:20, 192.168.1.2, uD3TN. DTChat has no native AAP2, so it talks
+# to a local aap2_bridge over loopback TCP (scripts/aap2_bridge/aap2_bridge.py),
+# which registers AAP2 agent id 2 (-> EID ipn:20.2) on the running uD3TN.
+#
+# uD3TN (from interop memo start-lunar.sh):
+#   build/posix/ud3tn --node-id ipn:20.0 -s ud3tn.socket -S ud3tn.aap2.socket \
+#       --cla "tcpclv3:*,4556" -x UD3TN_BDM_SECRET
+#   (UD3TN_BDM_SECRET set in env; earth route: ipn:10.0 tcpclv3:192.168.1.1:4556,
+#    mars reachable via `-r ipn:30.0`)
+#
+# Bridge to start alongside this config:
+#   export UD3TN_BDM_SECRET=<your 16+ char secret, must match start-lunar.sh>
+#   python3 scripts/aap2_bridge/aap2_bridge.py \
+#       --aap2-socket ud3tn.aap2.socket --agentid 2 \
+#       --recv-forward 127.0.0.1:7720 \
+#       --route 7710=ipn:10.2 \
+#       --route 7730=ipn:30.2
+#
+#   local_peer  Tcp 127.0.0.1:7720  <- bridge delivers inbound bundles here
+#   earth peer  Tcp 127.0.0.1:7710  -> bridge relays to ipn:10.2
+#   mars  peer  Tcp 127.0.0.1:7730  -> bridge relays to ipn:30.2
+a_sabr: "db/contact_plan.rc"
+
+local_peer:
+  uuid: "20"
+  name: moon
+  endpoints:
+    - type: Tcp
+      address: "127.0.0.1:7720"
+  color: 1
+
+# Full mesh: every peer here receives a copy of each message sent.
+peer_list:
+  - uuid: "10"
+    name: earth
+    endpoints:
+      - type: Tcp
+        address: "127.0.0.1:7710"
+    color: 2
+  - uuid: "30"
+    name: mars
+    endpoints:
+      - type: Tcp
+        address: "127.0.0.1:7730"
+    color: 0
+
+room_list:
+  - uuid: "0"
+    name: room 1
+    participants:
+      - 10
+      - 20
+      - 30

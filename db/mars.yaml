@@ -1,0 +1,36 @@
+# Mars node: ipn:30, 192.168.2.2, ION-DTN. DTChat is co-located with ION and
+# sends/receives over bp-socket (AF_BP) on EID ipn:30.2.
+# ION must register the DTChat endpoint: `a endpoint ipn:30.2 q` in ipn.rc.
+# Mars reaches moon only via earth (no direct contact).
+a_sabr: "db/contact_plan.rc"
+
+local_peer:
+  uuid: "30"
+  name: mars
+  endpoints:
+    - type: Bp
+      address: "ipn:30.2"
+  color: 0
+
+# Full mesh: every peer here receives a copy of each message sent.
+peer_list:
+  - uuid: "10"
+    name: earth
+    endpoints:
+      - type: Bp
+        address: "ipn:10.2"
+    color: 2
+  - uuid: "20"
+    name: moon
+    endpoints:
+      - type: Bp
+        address: "ipn:20.2"
+    color: 1
+
+room_list:
+  - uuid: "0"
+    name: room 1
+    participants:
+      - 10
+      - 20
+      - 30

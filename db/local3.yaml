@@ -1,0 +1,32 @@
+# Local loopback MARS node (no DTN needed). See db/default.yaml for usage.
+a_sabr: "db/contact_plan.rc"
+
+local_peer:
+  uuid: "30"
+  name: mars
+  endpoints:
+    - type: Udp
+      address: "127.0.0.1:7103"
+  color: 0
+
+peer_list:
+  - uuid: "10"
+    name: earth
+    endpoints:
+      - type: Udp
+        address: "127.0.0.1:7101"
+    color: 2
+  - uuid: "20"
+    name: moon
+    endpoints:
+      - type: Udp
+        address: "127.0.0.1:7102"
+    color: 1
+
+room_list:
+  - uuid: "0"
+    name: room 1
+    participants:
+      - 10
+      - 20
+      - 30

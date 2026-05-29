@@ -1,0 +1,40 @@
+## begin ionadmin
+1 30 ''
+s
+a contact +1 +86400 30 10 100000
+a contact +1 +86400 10 30 100000
+a range   +1 +86400 30 10 240
+a range   +1 +86400 10 30 240
+a contact +1 +86400 10 20 100000
+a contact +1 +86400 20 10 100000
+a range   +1 +86400 10 20 1
+a range   +1 +86400 20 10 1
+m production 1000000
+m consumption 1000000
+## end ionadmin
+## begin ionsecadmin
+1
+## end ionsecadmin
+## begin bpadmin
+1
+w 1
+a scheme ipn 'ipnfw' 'ipnadminep'
+a endpoint ipn:30.0 q
+a endpoint ipn:30.1 q
+a endpoint ipn:30.2 q
+a endpoint ipn:30.3 q
+a endpoint ipn:30.4 q
+a endpoint ipn:30.5 q
+a endpoint ipn:30.6 q
+a endpoint ipn:30.7 q
+a endpoint ipn:30.8 q
+a endpoint ipn:30.9 q
+a endpoint ipn:30.10 q
+a protocol tcp 1400 100 -1
+a induct  tcp 0.0.0.0:4556 tcpcli
+a outduct tcp 192.168.1.1:4556 tcpclo
+s
+## end bpadmin
+## begin ipnadmin
+a plan 10 tcp/192.168.1.1:4556
+## end ipnadmin
