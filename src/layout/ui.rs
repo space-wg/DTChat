@@ -12,7 +12,26 @@ use crate::layout::rooms::message_prompt::MessagePrompt;
 use eframe::egui;
 use egui::{CentralPanel, TopBottomPanel};
 
+/// Multiplier applied once to every built-in text style so labels read well on
+/// large/high-res screens.
+const UI_TEXT_SCALE: f32 = 1.25;
+
+fn apply_text_scale(ctx: &egui::Context) {
+    // Derive from defaults each call so repeated frames stay idempotent
+    // (scaling the live style would compound every frame).
+    let mut style = (*ctx.style()).clone();
+    let defaults = egui::Style::default().text_styles;
+    for (text_style, font_id) in style.text_styles.iter_mut() {
+        if let Some(base) = defaults.get(text_style) {
+            font_id.size = base.size * UI_TEXT_SCALE;
+        }
+    }
+    ctx.set_style(style);
+}
+
 pub fn display(app: &mut ChatApp, ctx: &egui::Context) {
+    apply_text_scale(ctx);
+
     TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         let mut menu = MenuBar::new();
         menu.show(app, ui);

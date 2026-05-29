@@ -3,13 +3,19 @@ use crate::utils::message::MessageStatus;
 use crate::utils::time::to_jst;
 
 /// Font size used for each chat-message body in the list pane.
-const MESSAGE_FONT_SIZE: f32 = 16.0;
+const MESSAGE_FONT_SIZE: f32 = 20.0;
+
+/// Font size of the sender name above each message.
+const NAME_FONT_SIZE: f32 = 17.0;
+
+/// Font size of the sent/recv (or ack) summary on the right.
+const TIMESTAMP_FONT_SIZE: f32 = 15.0;
 
 /// Diameter of the round sender avatar.
-const AVATAR_DIAMETER: f32 = 30.0;
+const AVATAR_DIAMETER: f32 = 40.0;
 
 /// Font size of the letter inside the avatar.
-const AVATAR_FONT_SIZE: f32 = 16.0;
+const AVATAR_FONT_SIZE: f32 = 21.0;
 
 pub struct MessageListView {}
 
@@ -89,9 +95,12 @@ impl MessageListView {
 
         // Sorting menu stays fixed above the scrolling message list.
         ui.horizontal(|ui| {
-            ui.label("Message sorting strategy:");
+            ui.label(egui::RichText::new("Message sorting strategy:").size(NAME_FONT_SIZE));
 
-            ui.menu_button(get_str_for_strat(&local_peer.uuid, &sort_strat), |ui| {
+            ui.menu_button(
+                egui::RichText::new(get_str_for_strat(&local_peer.uuid, &sort_strat))
+                    .size(NAME_FONT_SIZE),
+                |ui| {
                 if ui.button("Standard").on_hover_text("Sorted by sending times").clicked() {
                     locked_model.sort_messages(SortStrategy::Standard);
                     ui.close_menu();
@@ -137,7 +146,7 @@ impl MessageListView {
                                 ui.label(
                                     egui::RichText::new(&message.sender.name)
                                         .color(color)
-                                        .size(13.0)
+                                        .size(NAME_FONT_SIZE)
                                         .strong(),
                                 );
                                 ui.with_layout(
@@ -147,7 +156,7 @@ impl MessageListView {
                                             egui::RichText::new(timestamps_str(
                                                 &message.shipment_status,
                                             ))
-                                            .size(12.0)
+                                            .size(TIMESTAMP_FONT_SIZE)
                                             .color(egui::Color32::from_gray(200)),
                                         );
                                     },
