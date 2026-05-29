@@ -29,9 +29,27 @@ apt-get install -y \
     libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
     libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
 
-echo "[*] Rust toolchain (as $RUN_USER)"
-sudo -u "$RUN_USER" bash -lc 'command -v cargo >/dev/null 2>&1 || \
-    (curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y)'
+# A-SABR needs edition2024 -> Rust/Cargo >= 1.85. Distro (apt) cargo is often
+# older (e.g. 1.75) and would shadow rustup, so install/upgrade rustup and use
+# its cargo explicitly. MIN_RUST can be raised if a dep bumps the requirement.
+MIN_RUST="1.85"
+echo "[*] Rust toolchain via rustup (need >= $MIN_RUST, as $RUN_USER)"
+sudo -u "$RUN_USER" bash -lc '
+    set -e
+    if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+        curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    fi
+    "$HOME/.cargo/bin/rustup" update stable
+    "$HOME/.cargo/bin/rustup" default stable
+'
+CARGO="/home/$RUN_USER/.cargo/bin/cargo"
+[ "$RUN_USER" = "root" ] && CARGO="/root/.cargo/bin/cargo"
+ver="$($CARGO --version | awk '{print $2}')"
+if [ "$(printf '%s\n%s\n' "$MIN_RUST" "$ver" | sort -V | head -1)" != "$MIN_RUST" ]; then
+    echo "[error] cargo $ver < $MIN_RUST. Remove apt rust (sudo apt remove rustc cargo) and re-run." >&2
+    exit 1
+fi
+echo "[*] using cargo $ver ($CARGO)"
 
 case "$ROLE" in
 ion)
@@ -64,6 +82,6 @@ ud3tn)
 esac
 
 echo "[*] building DTChat (as $RUN_USER)"
-sudo -u "$RUN_USER" bash -lc 'cd "'"$PWD"'" && ~/.cargo/bin/cargo build --release'
+sudo -u "$RUN_USER" bash -lc 'cd "'"$PWD"'" && "'"$CARGO"'" build --release'
 
 echo "[done] $ROLE node ready. Next: bring up the stack, then run DTChat with its DTCHAT_CONFIG."
