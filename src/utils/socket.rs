@@ -1,13 +1,7 @@
-//! Transport layer for DTChat.
-//!
-//! Separation of concerns (the chat/UI layer never sees DTN details):
-//! - `Endpoint` is the single transport abstraction the app programs against.
-//! - `GenericSocket` binds/sends for each variant: `Udp`/`Tcp` are plain
-//!   sockets; `Bp` is the only DTN-specific path (ION via the AF_BP bp-socket).
-//! - uD3TN is reached with *no* code here: a Moon node uses a `Tcp` endpoint
-//!   pointing at the external AAP2 bridge (scripts/aap2_bridge), which speaks
-//!   AAP2 to uD3TN. So DTChat builds and runs with no DTN stack present; the
-//!   stack is purely a deployment/config concern.
+//! Transport layer. `Endpoint` is the only abstraction the app programs against;
+//! `Udp`/`Tcp` are plain sockets and `Bp` is the DTN path (ION via AF_BP).
+//! uD3TN needs no code here: a Moon node points a `Tcp` endpoint at the external
+//! AAP2 bridge, so DTChat builds and runs with no DTN stack present.
 
 use crate::utils::ack::{self};
 use crate::utils::config::Peer;
@@ -30,7 +24,7 @@ pub static TOKIO_RUNTIME: Lazy<Runtime> =
     Lazy::new(|| Runtime::new().expect("Failed to create Tokio runtime"));
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", content = "address")] // Internally tagged enum
+#[serde(tag = "type", content = "address")]
 pub enum Endpoint {
     Udp(String),
     Tcp(String),
@@ -258,7 +252,13 @@ impl GenericSocket {
                                                 controller.handle_ack_received(&message_uuid, &acker_uuid, is_read, ack_time);
                                             }
                                         }
-                                    }
+                                        } else {
+                                            // Log size only (not untrusted bytes) so corruption is visible.
+                                            eprintln!(
+                                                "dropped undecodable {}-byte datagram on {address_clone}",
+                                                payload.len()
+                                            );
+                                        }
                                 });
                                 }
                                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -433,7 +433,11 @@ impl DefaultSocketController {
             return;
         };
 
-        let target_endpoint = self.choose_ack_endpoint(sender_peer, received_on_endpoint);
+        let Some(target_endpoint) = self.choose_ack_endpoint(sender_peer, received_on_endpoint)
+        else {
+            eprintln!("ACK skipped: no usable endpoint for {}", sender_peer.name);
+            return;
+        };
         println!("Sending ACK to {} via {target_endpoint}", sender_peer.name);
 
         let mut socket = match GenericSocket::new(&target_endpoint) {
@@ -446,72 +450,40 @@ impl DefaultSocketController {
         ack::send_ack_message_non_blocking(message, &mut socket, &local_peer.uuid, false);
     }
 
+    // Prefer the transport the message arrived on, else BP > TCP > UDP; None if
+    // the peer has no usable endpoint (so a bad config can't panic the caller).
     fn choose_ack_endpoint(
         &self,
         sender_peer: &Peer,
         received_on_endpoint: Option<&Endpoint>,
-    ) -> Endpoint {
-        // Reply over the same transport family the message arrived on.
+    ) -> Option<Endpoint> {
         if let Some(received_endpoint) = received_on_endpoint {
-            if matches!(received_endpoint, Endpoint::Bp(_)) {
-                if let Some(bp_endpoint) = sender_peer
-                    .endpoints
-                    .iter()
-                    .find(|ep| matches!(ep, Endpoint::Bp(_)))
-                {
-                    return bp_endpoint.clone();
-                }
+            let family_match = |ep: &&Endpoint| match received_endpoint {
+                Endpoint::Bp(_) => matches!(ep, Endpoint::Bp(_)),
+                Endpoint::Tcp(_) => matches!(ep, Endpoint::Tcp(_)),
+                Endpoint::Udp(_) => matches!(ep, Endpoint::Udp(_)),
+            };
+            if let Some(ep) = sender_peer.endpoints.iter().find(family_match) {
+                return Some(ep.clone());
             }
+        }
 
-            match received_endpoint {
-                Endpoint::Tcp(_) => {
-                    if let Some(tcp_endpoint) = sender_peer
-                        .endpoints
-                        .iter()
-                        .find(|ep| matches!(ep, Endpoint::Tcp(_)))
-                    {
-                        return tcp_endpoint.clone();
+        let by_kind = |want_bp: bool, want_tcp: bool| {
+            sender_peer.endpoints.iter().find(|ep| {
+                ep.is_valid()
+                    && match ep {
+                        Endpoint::Bp(_) => want_bp,
+                        Endpoint::Tcp(_) => want_tcp,
+                        Endpoint::Udp(_) => !want_bp && !want_tcp,
                     }
-                }
-                Endpoint::Udp(_) => {
-                    if let Some(udp_endpoint) = sender_peer
-                        .endpoints
-                        .iter()
-                        .find(|ep| matches!(ep, Endpoint::Udp(_)))
-                    {
-                        return udp_endpoint.clone();
-                    }
-                }
-                _ => {}
-            }
-        }
+            })
+        };
 
-        // Fallback order: BP > TCP > UDP.
-        for endpoint in &sender_peer.endpoints {
-            match endpoint {
-                Endpoint::Bp(_) if endpoint.is_valid() => return endpoint.clone(),
-                _ => {}
-            }
-        }
-        for endpoint in &sender_peer.endpoints {
-            match endpoint {
-                Endpoint::Tcp(_) if endpoint.is_valid() => return endpoint.clone(),
-                _ => {}
-            }
-        }
-        for endpoint in &sender_peer.endpoints {
-            match endpoint {
-                Endpoint::Udp(_) if endpoint.is_valid() => return endpoint.clone(),
-                _ => {}
-            }
-        }
-
-        sender_peer
-            .endpoints
-            .iter()
-            .find(|ep| ep.is_valid())
-            .unwrap_or(&sender_peer.endpoints[0])
-            .clone()
+        by_kind(true, false)
+            .or_else(|| by_kind(false, true))
+            .or_else(|| by_kind(false, false))
+            .or_else(|| sender_peer.endpoints.iter().find(|ep| ep.is_valid()))
+            .cloned()
     }
 
     fn notify_observers(&self, message: ChatMessage) {
