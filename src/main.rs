@@ -7,7 +7,7 @@ mod utils;
 #[cfg(test)]
 mod mesh_integration;
 
-use app::{ChatApp, ChatModel, EventHandler};
+use app::{ChatApp, ChatModel, EventHandler, SortStrategy};
 use chrono::{Duration, Utc};
 use utils::{
     config::{AppConfigManager, Peer},
@@ -59,8 +59,9 @@ fn main() -> Result<(), eframe::Error> {
         prediction_config,
     );
 
-    // Seed demo messages anchored to `now` so the live 60s window is non-empty on startup.
     seed_demo_messages(&mut model, &local_peer, &shared_peers);
+    // add_message binary-inserts, so the seeded vec must start sorted.
+    model.sort_messages(SortStrategy::Standard);
 
     let model_arc = Arc::new(Mutex::new(model));
 
@@ -88,7 +89,6 @@ fn main() -> Result<(), eframe::Error> {
     Ok(())
 }
 
-/// Seed a demo conversation anchored to `Utc::now()` so launch shows content.
 fn seed_demo_messages(model: &mut ChatModel, local_peer: &Peer, shared_peers: &[Peer]) {
     let mut now = Utc::now() - Duration::seconds(40);
 

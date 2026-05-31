@@ -24,38 +24,35 @@ pub enum SortStrategy {
     Relative(Peer),
 }
 
-fn standard_cmp(a: &ChatMessage, b: &ChatMessage) -> Ordering {
-    let (tx_a, rx_a) = match &a.shipment_status {
-        MessageStatus::Sent { tx, .. } => (tx, tx),
-        MessageStatus::Received(tx, rx) => (tx, rx),
-    };
-    let (tx_b, rx_b) = match &b.shipment_status {
-        MessageStatus::Sent { tx, .. } => (tx, tx),
-        MessageStatus::Received(tx, rx) => (tx, rx),
-    };
-    tx_a.cmp(tx_b).then(rx_a.cmp(rx_b))
+// When the local node learned of a message: tx for our sends, rx for inbound.
+fn arrival_time(status: &MessageStatus) -> DateTime<Utc> {
+    match status {
+        MessageStatus::Sent { tx, .. } => *tx,
+        MessageStatus::Received(_, rx) => *rx,
+    }
 }
 
+// Order by local arrival time so a network-delayed message lands at the bottom
+// on arrival instead of buried back at its send time.
+fn standard_cmp(a: &ChatMessage, b: &ChatMessage) -> Ordering {
+    arrival_time(&a.shipment_status)
+        .cmp(&arrival_time(&b.shipment_status))
+        .then_with(|| a.shipment_status.tx_time().cmp(&b.shipment_status.tx_time()))
+}
+
+// Order from one peer's perspective: its own sends by tx, what it received by rx.
 fn relative_cmp(a: &ChatMessage, b: &ChatMessage, ctx_peer_uuid: &str) -> Ordering {
-    let (tx_a, rx_a) = match &a.shipment_status {
-        MessageStatus::Sent { tx, .. } => (tx, tx),
-        MessageStatus::Received(tx, rx) => (tx, rx),
+    let anchor = |m: &ChatMessage| match &m.shipment_status {
+        MessageStatus::Sent { tx, .. } => *tx,
+        MessageStatus::Received(tx, rx) => {
+            if m.sender.uuid == ctx_peer_uuid {
+                *tx
+            } else {
+                *rx
+            }
+        }
     };
-    let (tx_b, rx_b) = match &b.shipment_status {
-        MessageStatus::Sent { tx, .. } => (tx, tx),
-        MessageStatus::Received(tx, rx) => (tx, rx),
-    };
-    let anchor_a = if a.sender.uuid == ctx_peer_uuid {
-        rx_a
-    } else {
-        tx_a
-    };
-    let anchor_b = if b.sender.uuid == ctx_peer_uuid {
-        rx_b
-    } else {
-        tx_b
-    };
-    anchor_a.cmp(anchor_b)
+    anchor(a).cmp(&anchor(b))
 }
 
 pub struct ChatModel {
@@ -134,7 +131,6 @@ impl ChatModel {
         }
     }
 
-    /// Mark the delivery to `acker_uuid` on message `message_uuid` as acked.
     pub fn update_message_with_ack(
         &mut self,
         message_uuid: &str,
@@ -147,7 +143,7 @@ impl ChatModel {
                 return message.mark_ack(acker_uuid, ack_time);
             }
         }
-        false // Message not found
+        false
     }
 }
 
@@ -167,7 +163,6 @@ impl SocketObserver for Mutex<ChatModel> {
         let mut model = self.lock().unwrap();
         if model.update_message_with_ack(message_uuid, acker_uuid, is_read, ack_time) {
             println!("Updated message {message_uuid} with ACK from {acker_uuid} (read: {is_read})");
-            // Trigger UI update
             model.notify_observers(AppEvent::Sent("Message status updated".to_string()));
         } else {
             println!("ACK received for unknown delivery: {message_uuid} <- {acker_uuid}");
@@ -181,7 +176,6 @@ pub struct MessagePanel {
     pub message_to_send: String,
     pub send_status: Option<String>,
     pub pbat_enabled: bool,
-    /// Auto-track the latest 60s window; cleared on user pan, restored by "Reset view".
     pub graph_track_live: bool,
 }
 
@@ -231,10 +225,7 @@ pub trait ModelObserver: Send + Sync {
 
 impl ModelObserver for EventHandler {
     fn on_event(&mut self, event: AppEvent) {
-        if let AppEvent::Received(_message) = &event {
-            self.ctx.request_repaint()
-        }
-
+        self.ctx.request_repaint();
         self.events.push_back(event);
     }
 }
@@ -242,5 +233,130 @@ impl ModelObserver for EventHandler {
 impl eframe::App for ChatApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         display(self, ctx);
+        // Repaint while idle so messages/ACKs delivered on background threads render
+        // without user interaction (a one-shot request_repaint can be throttled).
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::message::{Delivery, MessageStatus};
+    use chrono::Duration;
+
+    fn peer(uuid: &str, name: &str) -> Peer {
+        Peer {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            endpoints: Vec::new(),
+            color: 0,
+        }
+    }
+
+    fn model() -> ChatModel {
+        ChatModel::new(
+            vec![peer("10", "earth"), peer("30", "mars")],
+            peer("10", "earth"),
+            Vec::new(),
+            None,
+        )
+    }
+
+    fn received(uuid: &str, sender: Peer, tx: DateTime<Utc>, rx: DateTime<Utc>) -> ChatMessage {
+        ChatMessage {
+            uuid: uuid.to_string(),
+            response: None,
+            sender,
+            text: "hi".to_string(),
+            shipment_status: MessageStatus::Received(tx, rx),
+        }
+    }
+
+    fn sent(uuid: &str, local: Peer, tx: DateTime<Utc>) -> ChatMessage {
+        ChatMessage {
+            uuid: uuid.to_string(),
+            response: None,
+            sender: local,
+            text: "hi".to_string(),
+            shipment_status: MessageStatus::Sent {
+                tx,
+                deliveries: Vec::new(),
+            },
+        }
+    }
+
+    fn order(m: &ChatModel) -> Vec<&str> {
+        m.messages.iter().map(|msg| msg.uuid.as_str()).collect()
+    }
+
+    // Core DTN fix: a long-delayed arrival sorts to the bottom, not its send slot.
+    #[test]
+    fn delayed_arrival_sorts_to_bottom() {
+        let mut m = model();
+        let now = Utc::now();
+        let mars = peer("30", "mars");
+
+        m.add_message(
+            received("fast", mars.clone(), now, now),
+            MessageDirection::Received,
+        );
+        // Sent 240s ago, only just arrived (1s after the fast one).
+        m.add_message(
+            received("delayed", mars, now - Duration::seconds(240), now + Duration::seconds(1)),
+            MessageDirection::Received,
+        );
+
+        assert_eq!(order(&m), vec!["fast", "delayed"]);
+    }
+
+    #[test]
+    fn sent_and_received_interleave_by_local_time() {
+        let mut m = model();
+        let now = Utc::now();
+        let earth = peer("10", "earth");
+        let mars = peer("30", "mars");
+
+        m.add_message(sent("s1", earth.clone(), now), MessageDirection::Sent);
+        m.add_message(
+            received("r1", mars, now - Duration::seconds(100), now + Duration::seconds(5)),
+            MessageDirection::Received,
+        );
+        m.add_message(
+            sent("s2", earth, now + Duration::seconds(10)),
+            MessageDirection::Sent,
+        );
+
+        assert_eq!(order(&m), vec!["s1", "r1", "s2"]);
+    }
+
+    #[test]
+    fn relative_local_anchors_received_on_rx() {
+        let now = Utc::now();
+        let local = peer("10", "earth");
+        let mars = peer("30", "mars");
+        let early_tx_late_rx = received("a", mars, now - Duration::seconds(240), now + Duration::seconds(1));
+        let our_send = sent("b", local.clone(), now);
+
+        assert_eq!(relative_cmp(&our_send, &early_tx_late_rx, &local.uuid), Ordering::Less);
+    }
+
+    #[test]
+    fn ack_marks_only_matching_delivery() {
+        let now = Utc::now();
+        let mut msg = sent("m", peer("10", "earth"), now);
+        if let MessageStatus::Sent { deliveries, .. } = &mut msg.shipment_status {
+            deliveries.push(Delivery {
+                peer_uuid: "30".to_string(),
+                peer_name: "mars".to_string(),
+                predicted_arrival: None,
+                acked_at: None,
+            });
+        }
+        let mut m = model();
+        m.add_message(msg, MessageDirection::Sent);
+
+        assert!(!m.update_message_with_ack("m", "21", false, now));
+        assert!(m.update_message_with_ack("m", "30", false, now));
     }
 }
