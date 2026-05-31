@@ -11,6 +11,20 @@ a contact +1 +86400 20 10 100000
 a contact +1 +86400 10 30 100000
 a contact +1 +86400 30 10 100000
 
+# Leaf nodes: 11=earth leaf, 21=lunar leaf, 31=mars leaf.
+# Each leaf attaches to its co-located gateway (11-10, 21-20, 31-30) over a
+# local link, so the leaf<->gateway hop is effectively zero light-time.
+a contact +1 +86400 11 11 100000
+a contact +1 +86400 21 21 100000
+a contact +1 +86400 31 31 100000
+
+a contact +1 +86400 11 10 100000
+a contact +1 +86400 10 11 100000
+a contact +1 +86400 21 20 100000
+a contact +1 +86400 20 21 100000
+a contact +1 +86400 31 30 100000
+a contact +1 +86400 30 31 100000
+
 a range +1 +86400 10 10 0
 a range +1 +86400 20 20 0
 a range +1 +86400 30 30 0
@@ -19,6 +33,17 @@ a range +1 +86400 10 20 1
 a range +1 +86400 20 10 1
 a range +1 +86400 10 30 240
 a range +1 +86400 30 10 240
+
+a range +1 +86400 11 11 0
+a range +1 +86400 21 21 0
+a range +1 +86400 31 31 0
+
+a range +1 +86400 11 10 0
+a range +1 +86400 10 11 0
+a range +1 +86400 21 20 0
+a range +1 +86400 20 21 0
+a range +1 +86400 31 30 0
+a range +1 +86400 30 31 0
 
 m production 1000000
 m consumption 1000000

@@ -42,6 +42,7 @@ import socket
 import socketserver
 import sys
 import threading
+import time
 from typing import Optional, Tuple
 
 # Imported lazily so the relay plumbing stays importable/testable on hosts
@@ -140,16 +141,47 @@ class _RouteServer(socketserver.ThreadingTCPServer):
         self.sender = sender
 
 
-def _forward_inbound(target: Tuple[str, int], payload: bytes) -> None:
-    """Deliver one received bundle to DTChat's local TCP listener."""
-    with socket.create_connection(target) as conn:
-        conn.sendall(payload)
-        conn.shutdown(socket.SHUT_WR)
+# Retry delivery to DTChat: it may be briefly down across a GUI restart, and the
+# bundle is already in hand from uD3TN, so a short backoff avoids losing it.
+_DELIVER_ATTEMPTS = 12
+_DELIVER_BACKOFF_S = 0.5
 
 
-def _run_receiver(client, target: Tuple[str, int], stop: threading.Event) -> None:
-    """Subscribe to inbound bundles and forward each payload to DTChat."""
-    LOGGER.info("listening for inbound bundles, forwarding to %s:%d", *target)
+def _forward_inbound(
+    target: Tuple[str, int], payload: bytes, stop: threading.Event
+) -> bool:
+    """Deliver one received bundle to DTChat's local TCP listener.
+
+    Returns True on success. Retries a bounded number of times so a momentarily
+    unavailable DTChat (e.g. mid-restart) does not silently drop the bundle.
+    """
+    last_err: Optional[OSError] = None
+    for attempt in range(_DELIVER_ATTEMPTS):
+        if stop.is_set():
+            return False
+        try:
+            with socket.create_connection(target, timeout=5) as conn:
+                conn.sendall(payload)
+                conn.shutdown(socket.SHUT_WR)
+            return True
+        except OSError as exc:
+            last_err = exc
+            if attempt + 1 < _DELIVER_ATTEMPTS:
+                stop.wait(_DELIVER_BACKOFF_S)
+    LOGGER.error(
+        "failed to deliver %d bytes to DTChat after %d attempts: %s",
+        len(payload),
+        _DELIVER_ATTEMPTS,
+        last_err,
+    )
+    return False
+
+
+def _drain(client, target: Tuple[str, int], stop: threading.Event) -> None:
+    """Pull inbound bundles from one AAP2 session and relay them to DTChat.
+
+    Raises on AAP2 disconnect/transport errors so the caller can reconnect.
+    """
     while not stop.is_set():
         msg = client.receive_msg()
         if msg is None:
@@ -159,12 +191,53 @@ def _run_receiver(client, target: Tuple[str, int], stop: threading.Event) -> Non
             continue
         # receive_adu returns (BundleADU, payload); we only relay the payload.
         _adu, payload = client.receive_adu(msg.adu)
-        client.send_response_status(ResponseStatus.RESPONSE_STATUS_SUCCESS)
-        try:
-            _forward_inbound(target, payload)
+        # Deliver first, then report the real outcome to uD3TN so we never ack a
+        # bundle we failed to hand off.
+        delivered = _forward_inbound(target, payload, stop)
+        client.send_response_status(
+            ResponseStatus.RESPONSE_STATUS_SUCCESS
+            if delivered
+            else ResponseStatus.RESPONSE_STATUS_FAILURE
+        )
+        if delivered:
             LOGGER.info("delivered %d bytes -> DTChat", len(payload))
-        except OSError:
-            LOGGER.exception("failed to deliver %d bytes to DTChat", len(payload))
+
+
+def _run_receiver(
+    make_client,
+    agentid: str,
+    secret,
+    target: Tuple[str, int],
+    stop: threading.Event,
+) -> None:
+    """Keep an inbound AAP2 subscription alive, reconnecting on any failure.
+
+    uD3TN can drop the AAP2 session (restart, transient error); without this loop
+    a single disconnect would kill inbound delivery for the rest of the run.
+    """
+    while not stop.is_set():
+        try:
+            client = make_client()
+            client.connect()
+            client.configure(agentid, subscribe=True, secret=secret)
+        except Exception:  # noqa: BLE001 - any setup failure: log and retry
+            LOGGER.exception("AAP2 receiver connect failed; retrying in 2s")
+            stop.wait(2.0)
+            continue
+
+        LOGGER.info("listening for inbound bundles, forwarding to %s:%d", *target)
+        try:
+            _drain(client, target, stop)
+        except Exception:  # noqa: BLE001 - disconnect/transport error: reconnect
+            if not stop.is_set():
+                LOGGER.warning("AAP2 receiver disconnected; reconnecting")
+        finally:
+            try:
+                client.disconnect()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
+        if not stop.is_set():
+            stop.wait(1.0)
 
 
 def _make_client(args: argparse.Namespace):
@@ -244,10 +317,6 @@ def main(argv: Optional[list] = None) -> int:
     secret = send_client.configure(args.agentid, subscribe=False, secret=args.secret)
     sender = Aap2Sender(send_client)
 
-    recv_client = _make_client(args)
-    recv_client.connect()
-    recv_client.configure(args.agentid, subscribe=True, secret=secret)
-
     servers = [
         _RouteServer(port, eid, sender) for port, eid in args.route
     ]
@@ -260,7 +329,7 @@ def main(argv: Optional[list] = None) -> int:
 
     receiver_thread = threading.Thread(
         target=_run_receiver,
-        args=(recv_client, args.recv_forward, stop),
+        args=(lambda: _make_client(args), args.agentid, secret, args.recv_forward, stop),
         daemon=True,
     )
     receiver_thread.start()
@@ -275,7 +344,6 @@ def main(argv: Optional[list] = None) -> int:
         for server in servers:
             server.shutdown()
         send_client.disconnect()
-        recv_client.disconnect()
     return 0
 
 
