@@ -2,19 +2,10 @@ use crate::app::{ChatApp, SortStrategy};
 use crate::utils::message::MessageStatus;
 use crate::utils::time::to_jst;
 
-/// Font size used for each chat-message body in the list pane.
 const MESSAGE_FONT_SIZE: f32 = 20.0;
-
-/// Font size of the sender name above each message.
 const NAME_FONT_SIZE: f32 = 17.0;
-
-/// Font size of the sent/recv (or ack) summary on the right.
 const TIMESTAMP_FONT_SIZE: f32 = 15.0;
-
-/// Diameter of the round sender avatar.
 const AVATAR_DIAMETER: f32 = 40.0;
-
-/// Font size of the letter inside the avatar.
 const AVATAR_FONT_SIZE: f32 = 21.0;
 
 pub struct MessageListView {}
@@ -32,7 +23,6 @@ fn get_str_for_strat(local_peer_uuid: &String, strat: &SortStrategy) -> String {
     }
 }
 
-/// Single-letter badge for a node: Earth->E, Moon(Lunar)->L, Mars->M.
 fn avatar_letter(name: &str) -> char {
     match name.to_ascii_lowercase().as_str() {
         "moon" | "lunar" => 'L',
@@ -46,7 +36,6 @@ fn avatar_letter(name: &str) -> char {
     }
 }
 
-/// Draw a filled circle with a centered letter, colored by the sender.
 fn draw_avatar(ui: &mut egui::Ui, letter: char, color: egui::Color32) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(AVATAR_DIAMETER, AVATAR_DIAMETER),
@@ -63,7 +52,6 @@ fn draw_avatar(ui: &mut egui::Ui, letter: char, color: egui::Color32) {
     );
 }
 
-/// Compact send / receive (or ack) summary shown on the right of each row.
 fn timestamps_str(status: &MessageStatus) -> String {
     match status {
         MessageStatus::Sent { tx, deliveries } => {
@@ -93,7 +81,6 @@ impl MessageListView {
         let sort_strat = locked_model.sort_strategy.clone();
         let local_peer = locked_model.localpeer.clone();
 
-        // Sorting menu stays fixed above the scrolling message list.
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Message sorting strategy:").size(NAME_FONT_SIZE));
 
@@ -101,7 +88,7 @@ impl MessageListView {
                 egui::RichText::new(get_str_for_strat(&local_peer.uuid, &sort_strat))
                     .size(NAME_FONT_SIZE),
                 |ui| {
-                if ui.button("Standard").on_hover_text("Sorted by sending times").clicked() {
+                if ui.button("Standard").on_hover_text("Sorted by local arrival time").clicked() {
                     locked_model.sort_messages(SortStrategy::Standard);
                     ui.close_menu();
                 }

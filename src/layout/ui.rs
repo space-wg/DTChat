@@ -12,13 +12,10 @@ use crate::layout::rooms::message_prompt::MessagePrompt;
 use eframe::egui;
 use egui::{CentralPanel, TopBottomPanel};
 
-/// Multiplier applied once to every built-in text style so labels read well on
-/// large/high-res screens.
 const UI_TEXT_SCALE: f32 = 1.25;
 
 fn apply_text_scale(ctx: &egui::Context) {
-    // Derive from defaults each call so repeated frames stay idempotent
-    // (scaling the live style would compound every frame).
+    // Derive from defaults each call so scaling stays idempotent across frames.
     let mut style = (*ctx.style()).clone();
     let defaults = egui::Style::default().text_styles;
     for (text_style, font_id) in style.text_styles.iter_mut() {
@@ -70,7 +67,6 @@ pub fn display(app: &mut ChatApp, ctx: &egui::Context) {
                     message_list.show(app, ui);
                 }
                 RoomView::Split => {
-                    // Initial split: ~35% list / ~65% graph. egui persists the user's drag.
                     let total_width = ui.available_width();
                     let default_left = (total_width * 0.30).clamp(200.0, total_width - 200.0);
 

@@ -3,9 +3,6 @@ use chrono::{DateTime, Utc};
 use super::config::Peer;
 use super::time::to_jst;
 
-/// Per-recipient delivery state for a message we sent. In a full mesh one send
-/// fans out to several peers, each with its own predicted arrival (from the
-/// contact plan) and its own ACK.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Delivery {
     pub peer_uuid: String,
@@ -16,12 +13,11 @@ pub struct Delivery {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MessageStatus {
-    /// A message we sent, with one delivery entry per recipient.
     Sent {
         tx: DateTime<Utc>,
         deliveries: Vec<Delivery>,
     },
-    /// A message we received: (sender's tx time, our rx time).
+    /// (sender's tx time, our rx time)
     Received(DateTime<Utc>, DateTime<Utc>),
 }
 
@@ -35,7 +31,6 @@ pub struct ChatMessage {
 }
 
 impl MessageStatus {
-    /// Send time, available for both variants.
     pub fn tx_time(&self) -> DateTime<Utc> {
         match self {
             MessageStatus::Sent { tx, .. } => *tx,
@@ -66,8 +61,6 @@ impl ChatMessage {
         }
     }
 
-    /// Mark the delivery to `acker_uuid` as acknowledged. Only sent messages
-    /// carry per-recipient deliveries; returns true if one was updated.
     pub fn mark_ack(&mut self, acker_uuid: &str, ack_time: DateTime<Utc>) -> bool {
         if let MessageStatus::Sent { deliveries, .. } = &mut self.shipment_status {
             for delivery in deliveries.iter_mut() {
